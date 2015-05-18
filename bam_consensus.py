@@ -72,7 +72,25 @@ def IUPAC_consensus( bases ):
                    'AGT' : 'D', 
                    'ACT' : 'H',
                    'ACG' : 'V',
-                   'ACGT': 'N'
+                   'ACGT': 'N',
+
+                   '-'    : '-',
+                   'A-'   : 'A',
+                   'C-'   : 'C',
+                   'G-'   : 'G',
+                   'T-'   : 'T',
+                   'AT-'  : 'W',
+                   'CG-'  : 'S',
+                   'AC-'  : 'M',
+                   'GT-'  : 'K',
+                   'AG-'  : 'R',
+                   'CT-'  : 'Y',
+                   'CGT-' : 'B',
+                   'AGT-' : 'D', 
+                   'ACT-' : 'H',
+                   'ACG-' : 'V',
+                   'ACGT-': 'N'
+
                    }
 
     IUPAC_consensus = ""
@@ -80,16 +98,16 @@ def IUPAC_consensus( bases ):
     for i in range(0, max_length):
         bases = [];
 
-        if (len(fb) > i and fb[i] != '-'):
+        if (len(fb) > i):
             bases.append( fb[i] )
 
-        if (len(sb) > i and sb[i] != '-'):
+        if (len(sb) > i):
             bases.append( sb[i] )
 
-        if (len(tb) > i and tb[i] != '-'):
+        if (len(tb) > i):
             bases.append( tb[i] )
 
-        if (len(Fb) > i and Fb[i] != '-'):
+        if (len(Fb) > i):
             bases.append( Fb[i] )
 
         fst = ''.join( sorted(set(bases)))
@@ -334,14 +352,16 @@ print str(start) + " " + str(end)
 
 gene_list = []
 set_gene_list()
-pp.pprint( gene_list )
+#pp.pprint( gene_list )
 
-MIN_MAPQ             =  10
-MIN_BASEQ            =  20
-MIN_COVERAGE         = 100
-MIN_ALLELE_PERC      =  20
-MIN_ALLELE_PERC      =   1
-CODON_MIN_PERCENTAGE =   1
+MIN_MAPQ             =   20
+MIN_BASEQ            =   30
+MIN_COVERAGE         = 1000
+MIN_MAP_LEN          =   80
+MIN_BP_FROM_END      =    5
+MIN_ALLELE_PERC      =    20
+CODON_MIN_PERCENTAGE =    1
+
 
 
 Stamford_format = dict()
@@ -351,7 +371,7 @@ ORF_start = 2550
 ORF_end   = 4227
 
 
-def consensus_base( base_counts ):
+def find_consensus_base( base_counts ):
 
     base_freqs = dict()
 
@@ -365,6 +385,11 @@ def consensus_base( base_counts ):
             continue
 
         base_freqs[ base ] = base_freq
+
+#    pp.pprint( base_freqs )
+
+    if ( total_bases < MIN_COVERAGE ):
+        return 'N'
 
 
     if (len( base_freqs.keys()) > 1):
@@ -381,6 +406,44 @@ def consensus_base( base_counts ):
             major_freq = base_freqs[ major_base ]
             minor_freq = base_freqs[ minor_base ]
 
+            major_starts_fwd = len(base_counts[ major_base ][ 0 ].keys())
+            minor_starts_fwd = len(base_counts[ minor_base ][ 0 ].keys())
+
+            major_starts_rev = len(base_counts[ major_base ][ 1 ].keys())
+            minor_starts_rev = len(base_counts[ minor_base ][ 1 ].keys())
+
+            major_starts =  major_starts_fwd + major_starts_rev
+            minor_starts =  minor_starts_fwd + minor_starts_rev
+
+            major_read1 = base_counts[ major_base ]['read1'] 
+            major_read2 = base_counts[ major_base ]['read2']
+
+            minor_read1 = base_counts[ minor_base ]['read1'] 
+            minor_read2 = base_counts[ minor_base ]['read2']
+
+
+            print "\t".join([str(pile.pos),
+                             major_base,
+                             minor_base,
+                             str(base_counts[ major_base ][ 'count' ]),
+                             str(base_counts[ minor_base ][ 'count' ]),
+                             "%.2f" % major_freq,
+                             "%.2f" % minor_freq,
+                             str(major_starts),
+                             str(major_starts_fwd),
+                             str(major_starts_rev),
+                             str(minor_starts),
+                             str(minor_starts_fwd),
+                             str(minor_starts_rev),
+                             
+                             str(major_read1),
+                             str(major_read2),
+                             
+                             str(minor_read1),
+                             str(minor_read2)])
+            continue
+                             
+
             if ( minor_freq < 3):
                 print "%d -> %d [%s %s] [%f %f]" % (0, i +1 , major_base, minor_base, major_freq, minor_freq)
  #               print "%d %d <--> %d" % (pile.pos, base_counts[ major_base ]['read1'], base_counts[ major_base ]['read2'])
@@ -394,8 +457,6 @@ def consensus_base( base_counts ):
             major_starts =  (base_counts[ major_base ][ 0 ].keys() + base_counts[ major_base ][ 1 ].keys())
             minor_starts =  (base_counts[ minor_base ][ 0 ].keys() + base_counts[ minor_base ][ 0 ].keys())
 
-            major_starts =  base_counts[ major_base ][ 'starts' ]
-            minor_starts =  base_counts[ minor_base ][ 'starts' ]
 
             start_bias_zvalue, start_bias_pvalue_fwd = stats.ranksums(major_starts, minor_starts)
 
@@ -403,8 +464,6 @@ def consensus_base( base_counts ):
 #            sleep( 1 )
 
 
-            major_starts_fwd =  (base_counts[ major_base ][ 0 ].keys())
-            minor_starts_fwd =  (base_counts[ minor_base ][ 0 ].keys())
             start_bias_zvalue_fwd, start_bias_pvalue_fwd = stats.ranksums(major_starts_fwd, minor_starts_fwd)
 
 
@@ -443,10 +502,34 @@ def consensus_base( base_counts ):
 
     return consensus_base
 
+print "\t".join(["pile.pos",
+                 "major_base",
+                 "minor_base",
+                 "major count",
+                 "minor count",
 
-#for pile in bam.pileup():
+                 "major_freq",
+                 "minor_freq",
+                 "major_starts",
+                 "major_starts_fwd",
+                 "major_starts_rev",
+                 "minor_starts",
+                 "minor_starts_fwd",
+                 "minor_starts_rev",
+                         
+                 "major_read1",
+                 "major_read2",
+                 
+                 "minor_read1",
+                 "minor_read2"])
+
+
+deletion_skipping = 0
+
+for pile in bam.pileup():
 #for pile in bam.pileup('K03455', 2670, 4227,max_depth=1000):
-for pile in bam.pileup('K03455', 2255, 2275,max_depth=10000):
+#for pile in bam.pileup('K03455', 2263, 2265,max_depth=10000000):
+#for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
 
     if ( start > -1 and end > -1) :
         if (pile.pos < start or pile.pos > end):
@@ -467,6 +550,14 @@ for pile in bam.pileup('K03455', 2255, 2275,max_depth=10000):
         if (read.alignment.mapq <= MIN_MAPQ ):
             continue
 
+        if (read.qpos < MIN_BP_FROM_END or read.qpos + MIN_BP_FROM_END > read.alignment.alen):
+            continue
+
+
+        if ( read.alignment.alen < MIN_MAP_LEN ):
+            continue
+        
+
         read_nr = 1
         if ( read.alignment.is_read2):
             read_nr = 2
@@ -480,12 +571,14 @@ for pile in bam.pileup('K03455', 2255, 2275,max_depth=10000):
 
         elif ( read.indel < 0):
             alt = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos, pile.pos+abs(read.indel)+1 )
+
+            alt = read.alignment.seq[ read.qpos ] + "-" * abs(read.indel)
+
             avg_base_qual = ord( read.alignment.qual[ read.qpos] ) - 33
 
         else:
             avg_base_qual = ord( read.alignment.qual[ read.qpos] ) - 33
             alt = read.alignment.seq[ read.qpos];
-
 
         if ( avg_base_qual > MIN_BASEQ):
             base_counts = update_base_counts(base_counts, alt, 
@@ -532,9 +625,23 @@ for pile in bam.pileup('K03455', 2255, 2275,max_depth=10000):
 
 
 
+    if ( deletion_skipping > 0 ):
+        deletion_skipping -= 1
+    else:
+        consensus_base = find_consensus_base( base_counts )
+        # If the consensus base contains a deletion, set the level of skipping here.
+        deletion_skipping =  consensus_base.count('-')
+
+#        print str(pile.pos) + " " + consensus_base+" - (" + str( deletion_skipping ) + ")"
+
+        consensus.append( consensus_base )
 
 
-#    pp.pprint( base_counts )
+
+
+#    if ( pile.pos == 142271):
+#        pp.pprint( base_counts )
+#        exit()
 
 #    pp.pprint( codon_counts )
 
@@ -543,12 +650,11 @@ for pile in bam.pileup('K03455', 2255, 2275,max_depth=10000):
     #continue
 
 #    print consensus_base( base_counts )
-    consensus_base( base_counts )
 
     
 
-if (len(consensus) == 0 or len(consensus) == N_bases):
-    exit()
+#if (len(consensus) == 0 or len(consensus) == N_bases):
+#    exit()
 
 
 
@@ -600,6 +706,8 @@ for j in range(len(consensus)):
             consensus_seq += consensus[i]
 
 
+consensus_seq = "".join( consensus )
+
 
 if ( minus_strand ):
     consensus_seq = revDNA( consensus_seq )
@@ -620,5 +728,5 @@ else:
 print consensus_seq
 
 
-samfile.close()
+bamfile.close()
 
