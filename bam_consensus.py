@@ -11,6 +11,7 @@ pp = pprint.PrettyPrinter(indent=4)
 import re
 import scipy
 from scipy import stats
+import getopt
 
 sys.path.append("/software/lib/python2.7/site-packages/pysam-0.7.5-py2.7-linux-x86_64.egg")
 import pysam
@@ -157,7 +158,6 @@ def codon2AA(codon):
     if (len(codon) > 3):
         return "i %d bp" %( len(codon) - 3)
 
-
     if ( codon not in codon2AA ):
 #        print "Cannot tranlate " + codon + " codon to an AA";
         return "X"
@@ -210,7 +210,6 @@ def update_AA_counts(AA_counts, codon, qual, strand, pos, read_nr):
 
     if (AA not in AA_counts):
         AA_counts[ AA ] = dict()
-        AA_counts[ AA ]['count'] = 0
         AA_counts[ AA ][ 'count' ] = 0
         AA_counts[ AA ][ 'quals' ] = 0
         AA_counts[ AA ][ 'read1' ] = 0
@@ -332,14 +331,14 @@ AA_MIN_PERC       =    1
 
 
 
-Stamford_format = dict()
+Stanford_format = dict()
 fasta_consensus = []
 AA_changes      = []
 
 ORF_start = 2550
 ORF_end   = 4227
 gene_name = 'Kinase'
-Stamford_format[gene_name] = [];
+Stanford_format[gene_name] = [];
 
 
 ORF_start = 140484
@@ -513,7 +512,7 @@ def find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number ):
     AA_line.append(ref_AA+str(AA_number))
     for AA in AAs_by_freq:
         AA_line.append( "%s:%.2f%%" % (AA, AA_freqs[ AA ]))
-        Stamford_format[gene_name].append("%s%d%s" % (ref_AA, AA_number, AA))
+        Stanford_format[gene_name].append("%s%d%s" % (ref_AA, AA_number, AA))
         
     AA_changes.append("\t".join( AA_line ))
 #    pp.pprint( AA_counts )
@@ -548,7 +547,10 @@ deletion_skipping = 0
 #for pile in bam.pileup():
 #for pile in bam.pileup('K03455', 2670, 4227,max_depth=1000):
 #for pile in bam.pileup('K03455', 2263, 2265,max_depth=10000000):
+max_depth = 0
 for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
+
+
 
     if ( start > -1 and end > -1) :
         if (pile.pos < start or pile.pos > end):
@@ -566,6 +568,10 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
             
         ref_codon = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos, pile.pos+3 )
         ref_AA    = codon2AA( ref_codon )
+
+
+    if (max_depth < pile.n ):
+        max_depth = pile.n
 
 
     for read in pile.pileups:
@@ -635,16 +641,6 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
                 avg_codon_qual = average_base_qual(read.alignment.qual[ read.qpos:read.qpos +  3]);
 
             
-            avg_codon_qual = average_base_qual(read.alignment.qual[ read.qpos:read.qpos +  3]);
-#            codon = read.alignment.seq[ read.qpos:read.qpos+ read.indel + 3 ]
-             
-            if ( len(codon) > 3 ):
-                pass
-#                print "[%s] %d +3 > %d %d %d" % (codon, read.qpos, read.alignment.qstart, read.alignment.qend, read.indel )
-
-
-
-
             if ( avg_codon_qual > MIN_BASEQ and pile.n > MIN_COVERAGE):
                 AA_counts = update_AA_counts(AA_counts, codon, 
                                              avg_codon_qual, read.alignment.is_reverse, read.alignment.aend, read_nr)
@@ -685,7 +681,7 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
 
 print "\n".join( AA_changes )
 
-print " ".join(Stamford_format[ gene_name])
+print " ".join(Stanford_format[ gene_name])
 
 
     #continue
