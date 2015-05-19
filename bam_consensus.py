@@ -150,11 +150,12 @@ def codon2AA(codon):
                  'GAA': 'E', 'GAG': 'E',
                  'GGT': 'G', 'GGC': 'G', 'GGA': 'G', 'GGG': 'G' }
                  
-    if (len(codon) > 3):
-        return "i"
+    if (len(codon) < 3 or re.search('-', codon)):
+        del_len = codon.count('-');
+        return "d %d bp" % del_len;
 
-    if (len(codon) < 3):
-        return "d"
+    if (len(codon) > 3):
+        return "i %d bp" %( len(codon) - 3)
 
 
     if ( codon not in codon2AA ):
@@ -202,70 +203,39 @@ def update_base_counts(base_counts, base, qual, strand, pos, read_nr):
 # dict for storing the stats regarding the codons we are currently looking at
 #
 # Kim Brugger (30 Apr 2015), contact: kbr@brugger.dk
-def update_codon_counts(codon_counts, codon, qual, strand, pos, read_nr):
+def update_AA_counts(AA_counts, codon, qual, strand, pos, read_nr):
 
-    if (codon not in codon_counts):
-        codon_counts[ codon ] = dict()
-        codon_counts[ codon ]['count'] = 0
-        codon_counts[ codon ][ 'count' ] = 0
-        codon_counts[ codon ][ 'quals' ] = 0
-        codon_counts[ codon ][ 'read1' ] = 0
-        codon_counts[ codon ][ 'read2' ] = 0
+    AA = codon2AA( codon )
+
+
+    if (AA not in AA_counts):
+        AA_counts[ AA ] = dict()
+        AA_counts[ AA ]['count'] = 0
+        AA_counts[ AA ][ 'count' ] = 0
+        AA_counts[ AA ][ 'quals' ] = 0
+        AA_counts[ AA ][ 'read1' ] = 0
+        AA_counts[ AA ][ 'read2' ] = 0
         # plus and minus strand
-        codon_counts[ codon ][ 0 ] = dict()
-        codon_counts[ codon ][ 1 ] = dict()
+        AA_counts[ AA ][ 0 ] = dict()
+        AA_counts[ AA ][ 1 ] = dict()
 
 
-    codon_counts[ codon ][ 'count' ] += 1
-    codon_counts[ codon ][ 'quals' ] += qual
+    AA_counts[ AA ][ 'count' ] += 1
+    AA_counts[ AA ][ 'quals' ] += qual
 
     if ( read_nr == 1 ):
-        codon_counts[ codon ][ 'read1' ] += 1
+        AA_counts[ AA ][ 'read1' ] += 1
     else:
-        codon_counts[ codon ][ 'read2' ] += 1
+        AA_counts[ AA ][ 'read2' ] += 1
 
-    if (pos not in codon_counts[ codon ][ strand ]):
-        codon_counts[ codon ][ strand ][ pos ]  = 1
+    if (pos not in AA_counts[ AA ][ strand ]):
+        AA_counts[ AA ][ strand ][ pos ]  = 1
     else:
-        codon_counts[ codon ][ strand ][ pos ] += 1
+        AA_counts[ AA ][ strand ][ pos ] += 1
 
-    return codon_counts;
-
-
-def codon_count2AA_count( codon_counts, minus_strand ):
-    AA_counts = dict();
-
-    
-    total_AAs = 0
-
-    for codon in (codon_counts.keys()):
-
-        AA = codon2AA( codon )
-
-        if ( minus_strand):
-            rev_codon = revDNA( codon )
-            AA = codon2AA( rev_codon )
+    return AA_counts;
 
 
-        if ( AA == "X"):
-            continue
-
-        if ( AA not in AA_counts) :
-            AA_counts[ AA ] = 0;
-
-        AA_counts[ AA ] += codon_counts[ codon ];
-        total_AAs += codon_counts[ codon ]
-
-    AA_percents = dict()
-
-    for AA in (AA_counts.keys()):
-        AA_percent = float(100)*float(AA_counts[ AA ])/float( total_AAs )
-        if ( AA_percent >= MIN_PERCENTAGE ):
-            AA_percents[ AA ] = "%.2f" % ( AA_percent )
-
-#    pp.pprint( AA_percents )
-
-    return AA_percents
 
 
 #
@@ -298,7 +268,6 @@ def set_gene_list():
                      ['RT', 2550, 4227, 0, 320],
                      ['Int',4233, 5100, 1]]
 
-
         fasta_ref = pysam.Fastafile("/refs/HIV/K03455.fasta");
         reference = "K03455";
 
@@ -319,7 +288,6 @@ def set_gene_list():
         gene_list = [['Pol', 2253, 2546, 5],
                      ['RT', 2550, 4227, 0, 320],
                      ['Int',4233, 5100, 1]]
-
 
         fasta_ref = pysam.Fastafile("/refs/HIV/K03455.fasta");
         reference = "K03455";
@@ -348,28 +316,34 @@ start        = -1
 end          = -1
 minus_strand = 0
 set_start_n_stop()
-print str(start) + " " + str(end)
+#print str(start) + " " + str(end)
 
 gene_list = []
 set_gene_list()
 #pp.pprint( gene_list )
 
-MIN_MAPQ             =   20
-MIN_BASEQ            =   30
-MIN_COVERAGE         = 1000
-MIN_MAP_LEN          =   80
-MIN_BP_FROM_END      =    5
-MIN_ALLELE_PERC      =    20
-CODON_MIN_PERCENTAGE =    1
+MIN_MAPQ          =   20
+MIN_BASEQ         =   30
+MIN_COVERAGE      = 1000
+MIN_MAP_LEN       =   80
+MIN_BP_FROM_END   =    5
+MIN_ALLELE_PERC   =   20
+AA_MIN_PERC       =    1
 
 
 
 Stamford_format = dict()
-consensus = []
+fasta_consensus = []
+AA_changes      = []
 
 ORF_start = 2550
 ORF_end   = 4227
+gene_name = 'Kinase'
+Stamford_format[gene_name] = [];
 
+
+ORF_start = 140484
+ORF_end   = 142405
 
 def find_consensus_base( base_counts ):
 
@@ -392,7 +366,7 @@ def find_consensus_base( base_counts ):
         return 'N'
 
 
-    if (len( base_freqs.keys()) > 1):
+    if (len( base_freqs.keys()) >= 1):
 
         bases_by_freq = sorted(base_freqs, key=base_freqs.get, reverse=True)
 
@@ -502,7 +476,52 @@ def find_consensus_base( base_counts ):
 
     return consensus_base
 
-print "\t".join(["pile.pos",
+
+
+def find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number ):
+
+    AA_freqs = dict()
+
+    total_AAs = 0
+    for AA in AA_counts:
+        total_AAs += AA_counts[ AA ]['count']
+
+    if ( total_AAs < MIN_COVERAGE ):
+        return 'x'
+    
+#    pp.pprint( AA_counts )    
+
+    alternative_AAs = 0
+
+    for AA in AA_counts:
+        if ( ref_AA == AA ):
+            continue
+
+        AA_freq = AA_counts[ AA ]['count']*100.00/total_AAs;
+        if ( AA_freq < AA_MIN_PERC ):
+            continue
+
+        AA_freqs[ AA ] = AA_freq
+        alternative_AAs += 1
+
+    if ( alternative_AAs == 0 ):
+        return
+
+    AAs_by_freq = sorted(AA_freqs, key=AA_freqs.get, reverse=True)
+    AA_line = []
+    AA_line.append(str(genome_pos));
+    AA_line.append(ref_AA+str(AA_number))
+    for AA in AAs_by_freq:
+        AA_line.append( "%s:%.2f%%" % (AA, AA_freqs[ AA ]))
+        Stamford_format[gene_name].append("%s%d%s" % (ref_AA, AA_number, AA))
+        
+    AA_changes.append("\t".join( AA_line ))
+#    pp.pprint( AA_counts )
+#    exit()
+    
+
+if ( 0 ) :
+    print "\t".join(["pile.pos",
                  "major_base",
                  "minor_base",
                  "major count",
@@ -526,10 +545,10 @@ print "\t".join(["pile.pos",
 
 deletion_skipping = 0
 
-for pile in bam.pileup():
+#for pile in bam.pileup():
 #for pile in bam.pileup('K03455', 2670, 4227,max_depth=1000):
 #for pile in bam.pileup('K03455', 2263, 2265,max_depth=10000000):
-#for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
+for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
 
     if ( start > -1 and end > -1) :
         if (pile.pos < start or pile.pos > end):
@@ -538,9 +557,16 @@ for pile in bam.pileup():
     passed_bases = 0
 
     base_counts  = dict()
-    codon_counts = dict()
+    AA_counts = dict()
     insertion_count = 0
     deletion_count  = 0
+
+    # We are in a coding frame...
+    if ( (ORF_start - 1  - pile.pos )%3 == 0):
+            
+        ref_codon = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos, pile.pos+3 )
+        ref_AA    = codon2AA( ref_codon )
+
 
     for read in pile.pileups:
 
@@ -550,13 +576,11 @@ for pile in bam.pileup():
         if (read.alignment.mapq <= MIN_MAPQ ):
             continue
 
-        if (read.qpos < MIN_BP_FROM_END or read.qpos + MIN_BP_FROM_END > read.alignment.alen):
+        if (read.qpos < MIN_BP_FROM_END or read.qpos + MIN_BP_FROM_END > read.alignment.qend):
             continue
-
 
         if ( read.alignment.alen < MIN_MAP_LEN ):
             continue
-        
 
         read_nr = 1
         if ( read.alignment.is_read2):
@@ -587,7 +611,8 @@ for pile in bam.pileup():
         # We are in a coding frame...
         if ( (ORF_start - 1  - pile.pos )%3 == 0):
             
-            if ( read.qpos + 3 > read.alignment.alen):
+            if ( read.qpos + 3 > read.alignment.qend):
+                print "going across the end ... %d %d" % ( read.qpos, read.alignment.qend )
                 continue
 
             codon          = "NNN"
@@ -596,33 +621,45 @@ for pile in bam.pileup():
             if ( read.indel > 0):
                 insertion_count += 1
                 avg_codon_qual = average_base_qual(read.alignment.qual[ read.qpos:read.qpos +  3]);
-                codon = read.alignment.seq[ read.qpos:read.qpos+ read.indel + 3 ]
-             
+                codon = read.alignment.seq[ read.qpos:read.qpos + 3 ] + '+'
 
             elif ( read.indel < 0):
                 avg_codon_qual = average_base_qual(read.alignment.qual[ read.qpos:read.qpos +  3]);
                 deletion_count += 1
-                codon = read.alignment.seq[ read.qpos] + "-" * abs(read.indel)
-                if ( 1 + abs(read.indel) < 3 ):
-                    codon  += read.alignment.seq[ read.qpos]
-
-                if (len(codon)>3):
-                    codon = codon[0:2]
+                codon = read.alignment.seq[ read.qpos] + "-" * abs(read.indel) + read.alignment.seq[ read.qpos + 1: read.qpos + 2]
+#                if (len(codon)>3):
+#                    codon = codon[0:3]
 
             else:
                 codon = read.alignment.seq[ read.qpos:read.qpos + 3];
                 avg_codon_qual = average_base_qual(read.alignment.qual[ read.qpos:read.qpos +  3]);
 
+            
+            avg_codon_qual = average_base_qual(read.alignment.qual[ read.qpos:read.qpos +  3]);
+#            codon = read.alignment.seq[ read.qpos:read.qpos+ read.indel + 3 ]
+             
+            if ( len(codon) > 3 ):
+                pass
+#                print "[%s] %d +3 > %d %d %d" % (codon, read.qpos, read.alignment.qstart, read.alignment.qend, read.indel )
 
-#            print codon
-#            print avg_codon_qual
-
-            if ( avg_codon_qual > MIN_BASEQ):
-                codon_counts = update_codon_counts(codon_counts, codon, 
-                                                   avg_codon_qual, read.alignment.is_reverse, read.alignment.aend, read_nr)
 
 
 
+            if ( avg_codon_qual > MIN_BASEQ and pile.n > MIN_COVERAGE):
+                AA_counts = update_AA_counts(AA_counts, codon, 
+                                             avg_codon_qual, read.alignment.is_reverse, read.alignment.aend, read_nr)
+
+        
+
+    if ( (ORF_start - 1  - pile.pos )%3 == 0):
+
+        AA_number    = (1+ (pile.pos + 1 - ORF_start)/3)
+        genome_pos      = pile.pos+1;
+
+        find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number )
+#        print ref_AA
+#        pp.pprint( codon_counts )
+#        exit()
 
 
     if ( deletion_skipping > 0 ):
@@ -634,7 +671,7 @@ for pile in bam.pileup():
 
 #        print str(pile.pos) + " " + consensus_base+" - (" + str( deletion_skipping ) + ")"
 
-        consensus.append( consensus_base )
+        fasta_consensus.append( consensus_base )
 
 
 
@@ -645,6 +682,10 @@ for pile in bam.pileup():
 
 #    pp.pprint( codon_counts )
 
+
+print "\n".join( AA_changes )
+
+print " ".join(Stamford_format[ gene_name])
 
 
     #continue
@@ -674,39 +715,8 @@ else:
 
 #print ">IUPAC_Consensus"
 
-dashlen = 0
-i = 0
 
-consensus_seq = ""
-
-#### print consensus sequence
-for j in range(len(consensus)):
-
-#    print "%d - %d" % (j, i)
-#    print str(i) +"  " + consensus[i]
-
-    if j >= i:
-        i = j + dashlen
-        dashlen = 0
-        anchor = ''
-
-          
-        if(len(consensus[i]) > 1):
-            dash = re.search("^([ATGCNatgcn])([-]+)", consensus[i])
-                        
-            if(dash):
-                anchor = dash.group(1)
-                dashlen = len(dash.group(2))
-                consensus_seq += anchor
-
-            else:
-                consensus_seq += consensus[i]
-
-        else:
-            consensus_seq += consensus[i]
-
-
-consensus_seq = "".join( consensus )
+consensus_seq = "".join( fasta_consensus )
 
 
 if ( minus_strand ):
@@ -728,5 +738,5 @@ else:
 print consensus_seq
 
 
-bamfile.close()
+bam.close()
 
