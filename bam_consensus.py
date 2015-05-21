@@ -257,93 +257,6 @@ def set_start_n_stop():
         (start, end) = (end, start)
 
 
-
-def set_gene_list():
-
-    global fasta_ref, gene_list
-
-    if ( re.search('C06', bamfile)):
-        gene_list = [['Pol', 2253, 2546, 5],
-                     ['RT', 2550, 4227, 0, 320],
-                     ['Int',4233, 5100, 1]]
-
-        fasta_ref = pysam.Fastafile("/refs/HIV/K03455.fasta");
-        reference = "K03455";
-
-    elif ( re.search(r'C11', bamfile)):
-    # The gene range needs to include the stop codon on the minus strand.
-        gene_list = [['TK/UL23', 48000, 46873],
-                     ['Pol/UL30', 63265, 66987]]
-
-        fasta_ref = pysam.Fastafile("/refs/HSV/Z86099.fasta");
-        reference = "Z86099";
-        
-    elif ( re.search(r'C19', bamfile)):
-        gene_list = [['Kinase', 140484, 142405], 
-                     ['Pol', 80631,76906]]
-        fasta_ref = pysam.Fastafile('/refs/CMV/CMV_AD169.fasta')
-        reference = "CMV_AD169"
-    else:
-        gene_list = [['Pol', 2253, 2546, 5],
-                     ['RT', 2550, 4227, 0, 320],
-                     ['Int',4233, 5100, 1]]
-
-        fasta_ref = pysam.Fastafile("/refs/HIV/K03455.fasta");
-        reference = "K03455";
-
-
-def average_base_qual(base_quals):
-
-    summed_quals = 0
-
-    for base_qual in base_quals:
-        summed_quals += ord( base_qual ) - 33
-
-    base_qual = summed_quals/len( base_quals )
-
-    return base_qual
-
-
-# ---------------- MAIN LOOP ------------------------
-bamfile   = sys.argv[1]
-fasta_ref = sys.argv[2]
-
-bam       = pysam.Samfile( bamfile, "rb" )
-
-
-start        = -1
-end          = -1
-minus_strand = 0
-set_start_n_stop()
-#print str(start) + " " + str(end)
-
-gene_list = []
-set_gene_list()
-#pp.pprint( gene_list )
-
-MIN_MAPQ          =   20
-MIN_BASEQ         =   30
-MIN_COVERAGE      = 1000
-MIN_MAP_LEN       =   80
-MIN_BP_FROM_END   =    5
-MIN_ALLELE_PERC   =   20
-AA_MIN_PERC       =    1
-
-
-
-Stanford_format = dict()
-fasta_consensus = []
-AA_changes      = []
-
-ORF_start = 2550
-ORF_end   = 4227
-gene_name = 'Kinase'
-Stanford_format[gene_name] = [];
-
-
-ORF_start = 140484
-ORF_end   = 142405
-
 def find_consensus_base( base_counts ):
 
     base_freqs = dict()
@@ -394,7 +307,6 @@ def find_consensus_base( base_counts ):
             minor_read1 = base_counts[ minor_base ]['read1'] 
             minor_read2 = base_counts[ minor_base ]['read2']
 
-
             print "\t".join([str(pile.pos),
                              major_base,
                              minor_base,
@@ -415,7 +327,6 @@ def find_consensus_base( base_counts ):
                              str(minor_read1),
                              str(minor_read2)])
             continue
-                             
 
             if ( minor_freq < 3):
                 print "%d -> %d [%s %s] [%f %f]" % (0, i +1 , major_base, minor_base, major_freq, minor_freq)
@@ -519,6 +430,93 @@ def find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number ):
 #    exit()
     
 
+
+def set_gene_list():
+
+    global fasta_ref, gene_list
+
+    if ( re.search('C06', bamfile)):
+        gene_list = [['Pol', 2253, 2546, 5],
+                     ['RT', 2550, 4227, 0, 320],
+                     ['Int',4233, 5100, 1]]
+
+        fasta_ref = pysam.Fastafile("/refs/HIV/K03455.fasta");
+        reference = "K03455";
+
+    elif ( re.search(r'C11', bamfile)):
+    # The gene range needs to include the stop codon on the minus strand.
+        gene_list = [['TK/UL23', 48000, 46873],
+                     ['Pol/UL30', 63265, 66987]]
+
+        fasta_ref = pysam.Fastafile("/refs/HSV/Z86099.fasta");
+        reference = "Z86099";
+        
+    elif ( re.search(r'C19', bamfile)):
+        gene_list = [['Kinase', 140484, 142405], 
+                     ['Pol', 80631,76906]]
+        fasta_ref = pysam.Fastafile('/refs/CMV/CMV_AD169.fasta')
+        reference = "CMV_AD169"
+    else:
+        gene_list = [['Pol', 2253, 2546, 5],
+                     ['RT', 2550, 4227, 0, 320],
+                     ['Int',4233, 5100, 1]]
+
+        fasta_ref = pysam.Fastafile("/refs/HIV/K03455.fasta");
+        reference = "K03455";
+
+
+def average_base_qual(base_quals):
+
+    summed_quals = 0
+
+    for base_qual in base_quals:
+        summed_quals += ord( base_qual ) - 33
+
+    base_qual = summed_quals/len( base_quals )
+
+    return base_qual
+
+
+# ---------------- MAIN LOOP ------------------------
+bamfile   = sys.argv[1]
+fasta_ref = sys.argv[2]
+
+bam       = pysam.Samfile( bamfile, "rb" )
+
+start        = -1
+end          = -1
+minus_strand = 0
+set_start_n_stop()
+#print str(start) + " " + str(end)
+
+gene_list = []
+set_gene_list()
+#pp.pprint( gene_list )
+
+MIN_MAPQ          =   20
+MIN_BASEQ         =   30
+MIN_COVERAGE      = 1000
+MIN_MAP_LEN       =   80
+MIN_BP_FROM_END   =    5
+MIN_ALLELE_PERC   =   20
+AA_MIN_PERC       =    1
+
+Stanford_format = dict()
+fasta_consensus = []
+AA_changes      = []
+
+ORF_start = 2550
+ORF_end   = 4227
+
+ORF_start = 140484
+ORF_end   = 142405
+ORF_start = 140483
+ORF_end   = 142404
+gene_name = 'Kinase'
+Stanford_format[gene_name] = [];
+
+
+
 if ( 0 ) :
     print "\t".join(["pile.pos",
                  "major_base",
@@ -544,6 +542,20 @@ if ( 0 ) :
 
 deletion_skipping = 0
 
+#get_options()
+if (0):
+    if ( output == "get_full_consensuses" ):
+        find_and_print_full_consensuses()
+
+    elif (output == "tab_output"):
+        find_and_print_taboutput()
+
+    elif( output == "region_analysis"):
+        find_regions_of_interest( print_consensus_fasta, print_AA_changes)
+    else:
+        usage()
+
+
 #for pile in bam.pileup():
 #for pile in bam.pileup('K03455', 2670, 4227,max_depth=1000):
 #for pile in bam.pileup('K03455', 2263, 2265,max_depth=10000000):
@@ -562,17 +574,17 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
     AA_counts = dict()
     insertion_count = 0
     deletion_count  = 0
+    in_coding_frame = 0
 
     # We are in a coding frame...
     if ( (ORF_start - 1  - pile.pos )%3 == 0):
-            
+        in_coding_frame = 1
         ref_codon = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos, pile.pos+3 )
         ref_AA    = codon2AA( ref_codon )
 
 
     if (max_depth < pile.n ):
         max_depth = pile.n
-
 
     for read in pile.pileups:
 
@@ -614,8 +626,8 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
             base_counts = update_base_counts(base_counts, alt, 
                                              avg_base_qual, read.alignment.is_reverse, read.alignment.aend, read_nr)
 
-        # We are in a coding frame...
-        if ( (ORF_start - 1  - pile.pos )%3 == 0):
+        # If we are in the coding frame do the codon analysis
+        if ( in_coding_frame ):
             
             if ( read.qpos + 3 > read.alignment.qend):
                 print "going across the end ... %d %d" % ( read.qpos, read.alignment.qend )
@@ -653,9 +665,6 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
         genome_pos      = pile.pos+1;
 
         find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number )
-#        print ref_AA
-#        pp.pprint( codon_counts )
-#        exit()
 
 
     if ( deletion_skipping > 0 ):
@@ -665,34 +674,13 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
         # If the consensus base contains a deletion, set the level of skipping here.
         deletion_skipping =  consensus_base.count('-')
 
-#        print str(pile.pos) + " " + consensus_base+" - (" + str( deletion_skipping ) + ")"
 
         fasta_consensus.append( consensus_base )
-
-
-
-
-#    if ( pile.pos == 142271):
-#        pp.pprint( base_counts )
-#        exit()
-
-#    pp.pprint( codon_counts )
 
 
 print "\n".join( AA_changes )
 
 print " ".join(Stanford_format[ gene_name])
-
-
-    #continue
-
-#    print consensus_base( base_counts )
-
-    
-
-#if (len(consensus) == 0 or len(consensus) == N_bases):
-#    exit()
-
 
 
             
