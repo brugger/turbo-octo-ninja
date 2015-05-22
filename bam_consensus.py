@@ -151,12 +151,17 @@ def codon2AA(codon):
                  'GAA': 'E', 'GAG': 'E',
                  'GGT': 'G', 'GGC': 'G', 'GGA': 'G', 'GGG': 'G' }
                  
-    if (len(codon) < 3 or re.search('-', codon)):
+    if (re.search('-', codon)):
         del_len = codon.count('-');
-        return "d %d bp" % del_len;
+        if (del_len > 3):
+            del_len = 3
+
+        return "deletion %d bp" % del_len;
 
     if (len(codon) > 3):
-        return "i %d bp" %( len(codon) - 3)
+        return "insertion %d bp" %( len(codon) - 3)
+    
+    
 
     if ( codon not in codon2AA ):
 #        print "Cannot tranlate " + codon + " codon to an AA";
@@ -197,6 +202,76 @@ def update_base_counts(base_counts, base, qual, strand, pos, read_nr):
         base_counts[ base ][ strand ][ pos ] += 1
 
     return base_counts;
+
+
+
+#
+# Grow codons base by base to ensure that we capture indels. Damn, this is getting complicated.
+#
+def grow_codons( codons, read_name, alt, avg_base_qual, strand, pos, read_nr, first_base):
+
+    if ( read_name not in codons ):
+        
+        if ( not first_base ):
+            return codons
+
+        codons[ read_name ] = dict()
+        codons[ read_name ][ 'codon' ]   = ""
+        codons[ read_name ][ 'quals' ]   = 0
+
+        codons[ read_name ][ 'start' ] = 0
+        codons[ read_name ][ 'strand' ] = 0
+        codons[ read_name ][ 'read_nr' ] = 0
+
+
+    # The two reads overlap at this position so discard thm to remove any bias
+    if ( codons[ read_name ][ 'read_nr' ] and codons[ read_name ][ 'read_nr' ] != read_nr ):
+        codons.pop( read_name )
+        return codons
+
+    codons[ read_name ][ 'codon' ]  +=  alt
+    codons[ read_name ][ 'quals' ]  +=  avg_base_qual
+
+    codons[ read_name ][ 'start' ]   = pos
+    codons[ read_name ][ 'strand' ]  = strand
+    codons[ read_name ][ 'read_nr' ] = read_nr
+
+    return codons
+
+
+def codons2AA_counts( codons ):
+
+    depth = len(codons.keys())
+
+#    print depth
+
+    AA_counts = dict()
+
+#    pp.pprint( codons )
+
+    for name in codons.keys():
+
+        codon   = codons[ name ][ 'codon' ]
+        qual    = codons[ name ][ 'quals' ]
+        strand  = codons[ name ][ 'strand' ]
+        pos     = codons[ name ][ 'start' ]
+        read_nr = codons[ name ][ 'read_nr' ]
+
+        
+        if ( len( codons[ name ][ 'codon' ]) < 3):
+            codons.pop( name )
+        else:
+
+            AA_counts = update_AA_counts(AA_counts, codon, qual, strand, pos, read_nr)
+
+            codons[ name ][ 'codon' ] = codons[ name ][ 'codon' ][3:-1]
+
+            if ( len( codons[ name ][ 'codon' ]) == 0):
+                codons.pop(name)
+
+    return (AA_counts, codons)
+#    pp.pprint( AA_counts )
+#    exit();
 
 
 #
@@ -343,11 +418,6 @@ def find_consensus_base( base_counts ):
 
 
             start_bias_zvalue, start_bias_pvalue_fwd = stats.ranksums(major_starts, minor_starts)
-
-#            print abs(start_bias_zvalue)
-#            sleep( 1 )
-
-
             start_bias_zvalue_fwd, start_bias_pvalue_fwd = stats.ranksums(major_starts_fwd, minor_starts_fwd)
 
 
@@ -495,7 +565,7 @@ set_gene_list()
 
 MIN_MAPQ          =   20
 MIN_BASEQ         =   30
-MIN_COVERAGE      = 1000
+MIN_COVERAGE      =  500
 MIN_MAP_LEN       =   80
 MIN_BP_FROM_END   =    5
 MIN_ALLELE_PERC   =   20
@@ -510,12 +580,12 @@ ORF_end   = 4227
 
 ORF_start = 140484
 ORF_end   = 142405
-ORF_start = 140483
-ORF_end   = 142404
+#ORF_start = 140483
+#ORF_end   = 142404
+#ORF_start = 142263
+
 gene_name = 'Kinase'
 Stanford_format[gene_name] = [];
-
-
 
 if ( 0 ) :
     print "\t".join(["pile.pos",
@@ -560,7 +630,8 @@ if (0):
 #for pile in bam.pileup('K03455', 2670, 4227,max_depth=1000):
 #for pile in bam.pileup('K03455', 2263, 2265,max_depth=10000000):
 max_depth = 0
-for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
+codons    = dict()
+for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=1000):
 
 
 
@@ -578,9 +649,21 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
 
     # We are in a coding frame...
     if ( (ORF_start - 1  - pile.pos )%3 == 0):
+
         in_coding_frame = 1
-        ref_codon = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos, pile.pos+3 )
+
+        (AA_counts, codons) = codons2AA_counts( codons )
+
+        AA_number    = (1+ (pile.pos + 1 - ORF_start - 3)/3)
+        genome_pos   = pile.pos+1 - 3;
+
+        ref_codon = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos - 3, pile.pos )
         ref_AA    = codon2AA( ref_codon )
+
+        find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number )
+
+#        codons = dict()
+
 
 
     if (max_depth < pile.n ):
@@ -626,8 +709,13 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
             base_counts = update_base_counts(base_counts, alt, 
                                              avg_base_qual, read.alignment.is_reverse, read.alignment.aend, read_nr)
 
+
+            codons = grow_codons( codons, read.alignment.qname, alt, avg_base_qual, 
+                                  read.alignment.is_reverse, read.alignment.aend, read_nr, in_coding_frame)
+
         # If we are in the coding frame do the codon analysis
         if ( in_coding_frame ):
+
             
             if ( read.qpos + 3 > read.alignment.qend):
                 print "going across the end ... %d %d" % ( read.qpos, read.alignment.qend )
@@ -654,17 +742,21 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
 
             
             if ( avg_codon_qual > MIN_BASEQ and pile.n > MIN_COVERAGE):
-                AA_counts = update_AA_counts(AA_counts, codon, 
-                                             avg_codon_qual, read.alignment.is_reverse, read.alignment.aend, read_nr)
+                pass
+#                AA_counts = update_AA_counts(AA_counts, codon, 
+#                                             avg_codon_qual, read.alignment.is_reverse, read.alignment.aend, read_nr)
 
         
 
-    if ( (ORF_start - 1  - pile.pos )%3 == 0):
+    if ( in_coding_frame ):
+
+#        pp.pprint(codons)
+#        exit()
 
         AA_number    = (1+ (pile.pos + 1 - ORF_start)/3)
         genome_pos      = pile.pos+1;
 
-        find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number )
+#        find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number )
 
 
     if ( deletion_skipping > 0 ):
@@ -680,7 +772,7 @@ for pile in bam.pileup('CMV_AD169', 142272, 142291,max_depth=10000):
 
 print "\n".join( AA_changes )
 
-print " ".join(Stanford_format[ gene_name])
+#print " ".join(Stanford_format[ gene_name])
 
 
             
