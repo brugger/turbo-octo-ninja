@@ -1,0 +1,4 @@
+#gene	chromo	start	end	first_codon	last_codon
+Pr	K03455	2253	2546	5
+RT	K03455	2550	4227	1	320
+Int	K03455	4233 	5100 	1
