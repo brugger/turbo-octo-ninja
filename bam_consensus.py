@@ -17,8 +17,25 @@ sys.path.append("/software/lib/python2.7/site-packages/pysam-0.7.5-py2.7-linux-x
 import pysam
 
 
+# Various global variables 
+
+FASTA_OUT = 1
+CODON_OUT = 2
+TAB_OUT   = 4
+
+# These affect the sensitivity and behaviour of  the program
+MIN_MAPQ          =    20
+MIN_BASEQ         =    30
+MIN_COVERAGE      =   400
+DOWNSAMPLE_DEPTH  = 10000
+MIN_MAP_LEN       =    80
+MIN_BP_FROM_END   =     5
+MIN_ALLELE_PERC   =    20
+AA_MIN_PERC       =     1
+
+
 #
-# reverse a DNA string, even with IUPAC codes
+# reverse a DNA string, even with IUPAC codes and gaps!
 #
 # Kim Brugger (30 Apr 2015), contact: kbr@brugger.dk
 def revDNA( string ):
@@ -39,7 +56,7 @@ def revDNA( string ):
 
 
 #
-# creates an IUPAC based on the input of 2-4 seqs input
+# creates an IUPAC based on the input of 2-4 seqs input, including gaps
 def IUPAC_consensus( bases ):
 
     # This bit is shit, need to fix it later...
@@ -160,11 +177,8 @@ def codon2AA(codon):
 
     if (len(codon) > 3):
         return "insertion %d bp" %( len(codon) - 3)
-    
-    
 
     if ( codon not in codon2AA ):
-#        print "Cannot tranlate " + codon + " codon to an AA";
         return "X"
 
     return codon2AA[ codon ] 
@@ -212,6 +226,8 @@ def grow_codons( codons, read_name, alt, avg_base_qual, strand, pos, read_nr, fi
 
     if ( read_name not in codons ):
         
+
+        #Only if we are on the first base of a codon do we create a new entry
         if ( not first_base ):
             return codons
 
@@ -231,7 +247,6 @@ def grow_codons( codons, read_name, alt, avg_base_qual, strand, pos, read_nr, fi
 
     codons[ read_name ][ 'codon' ]  +=  alt
     codons[ read_name ][ 'quals' ]  +=  avg_base_qual
-
     codons[ read_name ][ 'start' ]   = pos
     codons[ read_name ][ 'strand' ]  = strand
     codons[ read_name ][ 'read_nr' ] = read_nr
@@ -258,20 +273,23 @@ def codons2AA_counts( codons ):
         read_nr = codons[ name ][ 'read_nr' ]
 
         
+        # The seq is shorter than the full codon, so we drop it from the table and move on
         if ( len( codons[ name ][ 'codon' ]) < 3):
             codons.pop( name )
         else:
 
             AA_counts = update_AA_counts(AA_counts, codon, qual, strand, pos, read_nr)
 
+
+            # Trim away the bases we have used, This is done to ensure that we can 
+            # report longer deletions in a nice manner. I am sure there is a massive 
+            # computational overhad for this, but it works really nice.
             codons[ name ][ 'codon' ] = codons[ name ][ 'codon' ][3:-1]
 
             if ( len( codons[ name ][ 'codon' ]) == 0):
                 codons.pop(name)
 
     return (AA_counts, codons)
-#    pp.pprint( AA_counts )
-#    exit();
 
 
 #
@@ -281,7 +299,6 @@ def codons2AA_counts( codons ):
 def update_AA_counts(AA_counts, codon, qual, strand, pos, read_nr):
 
     AA = codon2AA( codon )
-
 
     if (AA not in AA_counts):
         AA_counts[ AA ] = dict()
@@ -310,31 +327,14 @@ def update_AA_counts(AA_counts, codon, qual, strand, pos, read_nr):
     return AA_counts;
 
 
-
-
 #
-# Sets starts and stop positions if provided by the user, otherwise do the whole sequence
+# Finds the consensus base(s)
 #
-# Kim Brugger (30 Apr 2015), contact: kbr@brugger.dk
-def set_start_n_stop():
-    global start, end
-
-    if ( len(sys.argv) >= 4 ) :
-        start = int(sys.argv[3])
-
-
-    if ( len(sys.argv) >= 5 ) :
-        end = int(sys.argv[4])
-
-
-    if ( start > -1 and end > -1 and (end < start)):
-        minus_strand = 1;
-        (start, end) = (end, start)
-
-
-def find_consensus_base( base_counts ):
+# Kim Brugger (27 May 2015), contact: kbr@brugger.dk
+def find_consensus_base( base_counts, pos = 0, ref_base = 'N' ):
 
     base_freqs = dict()
+    all_base_freqs = dict()
 
     total_bases = 0
     for base in base_counts:
@@ -342,6 +342,7 @@ def find_consensus_base( base_counts ):
 
     for base in base_counts:
         base_freq = base_counts[ base ]['count']*100.00/total_bases;
+        all_base_freqs[ base ] = base_freq
         if ( base_freq < MIN_ALLELE_PERC ):
             continue
 
@@ -352,99 +353,101 @@ def find_consensus_base( base_counts ):
     if ( total_bases < MIN_COVERAGE ):
         return 'N'
 
+    if (output_format & TAB_OUT and len( all_base_freqs.keys()) >= 1):
 
-    if (len( base_freqs.keys()) >= 1):
+        bases_by_freq = sorted(all_base_freqs, key=base_freqs.get, reverse=True)
 
-        bases_by_freq = sorted(base_freqs, key=base_freqs.get, reverse=True)
+        if (ref_base == 'N'):
+            
+            ref_base = bases_by_freq[0]
 
-#        pp.pprint( base_counts )
+        ref_read1 = base_counts[ ref_base ]['read1'] or 0
+        ref_read2 = base_counts[ ref_base ]['read2']
+        ref_starts_rev = len(base_counts[ ref_base ][ 1 ].keys())
+        ref_starts_fwd = len(base_counts[ ref_base ][ 0 ].keys())
+        ref_freq = all_base_freqs[ ref_base ]
+        ref_starts =  ref_starts_fwd + ref_starts_rev
 
-        for i in range(1, len( bases_by_freq)):
+        for i in range(0, len( bases_by_freq)):
 
-            major_base = bases_by_freq[ 0 ]
-            minor_base = bases_by_freq[ i ]
+            alt_base = bases_by_freq[ i ]
 
-            major_freq = base_freqs[ major_base ]
-            minor_freq = base_freqs[ minor_base ]
+            if ( ref_base == alt_base):
+                continue
 
-            major_starts_fwd = len(base_counts[ major_base ][ 0 ].keys())
-            minor_starts_fwd = len(base_counts[ minor_base ][ 0 ].keys())
+            alt_freq = all_base_freqs[ alt_base ]
 
-            major_starts_rev = len(base_counts[ major_base ][ 1 ].keys())
-            minor_starts_rev = len(base_counts[ minor_base ][ 1 ].keys())
 
-            major_starts =  major_starts_fwd + major_starts_rev
-            minor_starts =  minor_starts_fwd + minor_starts_rev
+            alt_starts_fwd = len(base_counts[ alt_base ][ 0 ].keys())
+            alt_starts_rev = len(base_counts[ alt_base ][ 1 ].keys())
+            alt_starts =  alt_starts_fwd + alt_starts_rev
+            alt_read1 = base_counts[ alt_base ]['read1'] 
+            alt_read2 = base_counts[ alt_base ]['read2']
 
-            major_read1 = base_counts[ major_base ]['read1'] 
-            major_read2 = base_counts[ major_base ]['read2']
-
-            minor_read1 = base_counts[ minor_base ]['read1'] 
-            minor_read2 = base_counts[ minor_base ]['read2']
-
-            print "\t".join([str(pile.pos),
-                             major_base,
-                             minor_base,
-                             str(base_counts[ major_base ][ 'count' ]),
-                             str(base_counts[ minor_base ][ 'count' ]),
-                             "%.2f" % major_freq,
-                             "%.2f" % minor_freq,
-                             str(major_starts),
-                             str(major_starts_fwd),
-                             str(major_starts_rev),
-                             str(minor_starts),
-                             str(minor_starts_fwd),
-                             str(minor_starts_rev),
+            global tab_lines
+            tab_lines.append( "\t".join([str(pos),
+                             ref_base,
+                             base,
+                             str(base_counts[ ref_base ][ 'count' ]),
+                             str(base_counts[ alt_base ][ 'count' ]),
+                             "%.2f" % ref_freq,
+                             "%.2f" % alt_freq,
+                             str(ref_starts),
+                             str(ref_starts_fwd),
+                             str(ref_starts_rev),
+                             str(alt_starts),
+                             str(alt_starts_fwd),
+                             str(alt_starts_rev),
                              
-                             str(major_read1),
-                             str(major_read2),
+                             str(ref_read1),
+                             str(ref_read2),
                              
-                             str(minor_read1),
-                             str(minor_read2)])
+                             str(alt_read1),
+                             str(alt_read2)]))
             continue
 
-            if ( minor_freq < 3):
-                print "%d -> %d [%s %s] [%f %f]" % (0, i +1 , major_base, minor_base, major_freq, minor_freq)
- #               print "%d %d <--> %d" % (pile.pos, base_counts[ major_base ]['read1'], base_counts[ major_base ]['read2'])
-                print "STRANDS [%d] %d  %d" % (pile.pos, base_counts[ minor_base ]['read1'], base_counts[ minor_base ]['read2'])
+            if ( alt_freq < 3):
+                print "%d -> %d [%s %s] [%f %f]" % (0, i +1 , ref_base, alt_base, ref_freq, alt_freq)
+ #               print "%d %d <--> %d" % (pile.pos, base_counts[ ref_base ]['read1'], base_counts[ ref_base ]['read2'])
+                print "STRANDS [%d] %d  %d" % (pile.pos, base_counts[ alt_base ]['read1'], base_counts[ alt_base ]['read2'])
 
-                print "\t".join([str(len(base_counts[ major_base ][ 0 ].keys())),
-                                 str(len(base_counts[ major_base ][ 1 ].keys())),
-                                 str(len(base_counts[ minor_base ][ 0 ].keys())),
-                                 str(len(base_counts[ minor_base ][ 1 ].keys()))])
+                print "\t".join([str(len(base_counts[ ref_base ][ 0 ].keys())),
+                                 str(len(base_counts[ ref_base ][ 1 ].keys())),
+                                 str(len(base_counts[ alt_base ][ 0 ].keys())),
+                                 str(len(base_counts[ alt_base ][ 1 ].keys()))])
 
-            major_starts =  (base_counts[ major_base ][ 0 ].keys() + base_counts[ major_base ][ 1 ].keys())
-            minor_starts =  (base_counts[ minor_base ][ 0 ].keys() + base_counts[ minor_base ][ 0 ].keys())
-
-
-            start_bias_zvalue, start_bias_pvalue_fwd = stats.ranksums(major_starts, minor_starts)
-            start_bias_zvalue_fwd, start_bias_pvalue_fwd = stats.ranksums(major_starts_fwd, minor_starts_fwd)
+            ref_starts =  (base_counts[ ref_base ][ 0 ].keys() + base_counts[ ref_base ][ 1 ].keys())
+            alt_starts =  (base_counts[ alt_base ][ 0 ].keys() + base_counts[ alt_base ][ 0 ].keys())
 
 
-            major_starts_rev =  (base_counts[ major_base ][ 1 ].keys())
-            minor_starts_rev =  (base_counts[ minor_base ][ 1 ].keys())
-            start_bias_zvalue_rev, start_bias_pvalue_rev = stats.ranksums(major_starts_rev, minor_starts_rev)
+            start_bias_zvalue, start_bias_pvalue_fwd = stats.ranksums(ref_starts, alt_starts)
+            start_bias_zvalue_fwd, start_bias_pvalue_fwd = stats.ranksums(ref_starts_fwd, alt_starts_fwd)
+
+
+            ref_starts_rev =  (base_counts[ ref_base ][ 1 ].keys())
+            alt_starts_rev =  (base_counts[ alt_base ][ 1 ].keys())
+            start_bias_zvalue_rev, start_bias_pvalue_rev = stats.ranksums(ref_starts_rev, alt_starts_rev)
 
 
             if ( start_bias_pvalue_fwd < 0.05 or start_bias_pvalue_fwd < 0.05):
                 print str(start_bias_pvalue_fwd) + " " + str(start_bias_pvalue_rev)
-                print "%s (%f) vs %s (%f) fails, should it drop %s?" % ( major_base, major_freq, minor_base, minor_freq, minor_base)                
-#                del base_freqs[ minor_base]
+                print "%s (%f) vs %s (%f) fails, should it drop %s?" % ( ref_base, ref_freq, alt_base, alt_freq, alt_base)                
+#                del base_freqs[ alt_base]
 #                exit()
 
             # Use fishers test to see if there is a strand bias for the SNP
-            oddsratio, strand_bias_pvalue = stats.fisher_exact([[len(base_counts[ major_base ][ 0 ].keys()), 
-                                                                 len(base_counts[ major_base ][ 1 ].keys())], 
-                                                                [len(base_counts[ minor_base ][ 0 ].keys()), 
-                                                                 len(base_counts[ minor_base ][ 1 ].keys())]])
+            oddsratio, strand_bias_pvalue = stats.fisher_exact([[len(base_counts[ ref_base ][ 0 ].keys()), 
+                                                                 len(base_counts[ ref_base ][ 1 ].keys())], 
+                                                                [len(base_counts[ alt_base ][ 0 ].keys()), 
+                                                                 len(base_counts[ alt_base ][ 1 ].keys())]])
             if ( strand_bias_pvalue < 0.05 ):
 #                pp.pprint( base_counts)
-                print "\t".join([str(len(base_counts[ major_base ][ 0 ].keys())),
-                                 str(len(base_counts[ major_base ][ 1 ].keys())),
-                                 str(len(base_counts[ minor_base ][ 0 ].keys())),
-                                 str(len(base_counts[ minor_base ][ 1 ].keys()))])
+                print "\t".join([str(len(base_counts[ ref_base ][ 0 ].keys())),
+                                 str(len(base_counts[ ref_base ][ 1 ].keys())),
+                                 str(len(base_counts[ alt_base ][ 0 ].keys())),
+                                 str(len(base_counts[ alt_base ][ 1 ].keys()))])
 
-#                print "%d -> %d [%s %s] [%f %f]" % (0, i +1 , major_base, minor_base, major_freq, minor_freq)
+#                print "%d -> %d [%s %s] [%f %f]" % (0, i +1 , ref_base, alt_base, ref_freq, alt_freq)
 #                print "strand bias (pvalue): %.2f (> 0.05 no bias)" % strand_bias_pvalue
 #                exit()
 
@@ -491,9 +494,20 @@ def find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number ):
     AA_line = []
     AA_line.append(str(genome_pos));
     AA_line.append(ref_AA+str(AA_number))
+    added_D = 0
+    added_I = 0
     for AA in AAs_by_freq:
         AA_line.append( "%s:%.2f%%" % (AA, AA_freqs[ AA ]))
-        Stanford_format[gene_name].append("%s%d%s" % (ref_AA, AA_number, AA))
+
+        if ( re.match('insertion', AA ) and not added_D ):
+            added_D = 1
+            Stanford_format[gene_name].append("%s%d%s" % (ref_AA, AA_number, "i"))
+        elif ( re.match('deletion', AA ) and not added_I ):
+            added_I = 1
+            Stanford_format[gene_name].append("%s%d%s" % (ref_AA, AA_number, "d"))
+        else:
+            Stanford_format[gene_name].append("%s%d%s" % (ref_AA, AA_number, AA))
+
         
     AA_changes.append("\t".join( AA_line ))
 #    pp.pprint( AA_counts )
@@ -551,7 +565,6 @@ def readin_regions( regions_file ):
 
     regions = []
 
-
     regions_fh = open( regions_file, 'r')
     for l in regions_fh:
         l = l.strip('\n')
@@ -559,16 +572,102 @@ def readin_regions( regions_file ):
             continue
 
         fields = l.split("\t") + [None]*99
-        regions.append(fields[1:7])
+        for n in range(2, 5):
+            if ( fields[ n ]):
+                fields[ n ] = int(fields[ n ])
 
-
-    pp.pprint( regions )
+        regions.append(fields[0:6])
 
     return regions
+
+def print_tab_output( tab_data_lines = None):
+#    return
+
+    global tab_lines
+
+    print "\t".join(["pile.pos",
+                 "ref/major base",
+                 "alt base",
+                 "major count",
+                 "ref count",
+
+                 "ref freq",
+                 "alt freq",
+                 "ref starts",
+                 "ref starts fwd",
+                 "re starts rev",
+                 "alt starts",
+                 "alt starts fwd",
+                 "alt starts rev",
+                         
+                 "ref read1",
+                 "ref read2",
+                 
+                 "alt read1",
+                 "alt read2"])
+
+
+    print "\n".join( tab_lines )
+
+
+
+def print_fasta_consensus():
+
+            
+#### get input filename without the path
+
+
+    consensus_seq = "".join( fasta_consensus )
+
+
+    if ( minus_strand ):
+#        pass
+        consensus_seq = revDNA( consensus_seq )
+
+
+    consensus_seq = re.sub(r'^N+',"", consensus_seq)
+    consensus_seq = re.sub(r'N+$',"", consensus_seq)
+
+    if ( len( consensus_seq ) == 0):
+        return 
+
+#    if ( len(consensus_seq) == 0):
+#        exit()
+
+    header = ">%s_Consensus" % sample_name
+
+    if ( gene_name ):
+        header += " %s" % gene_name
+
+
+    if ( ORF_start > 0 and ORF_end > -1):
+        header += " %d-%d" %(ORF_start, ORF_end)
+
+    if ( fasta_fh ):
+        fasta_fh.write( header + "\n" )
+        fasta_fh.write( consensus_seq + "\n" )
+    else:
+        print header
+        print consensus_seq
+
+
+
+def print_codon_changes():
+
+
+    if ( len( AA_changes) == 0):
+        return
+
+    block = gene_name +"\n"
+    block +=  "\n".join( AA_changes )
+    block += "\n\n"
+    block += " ".join(Stanford_format[ gene_name]) + "\n"
+
+    if ( codon_fh ):
+        codon_fh.write( block + "\n")
+    else:
+        print block
     
-
-
-
 
 def readin_bamfile( chrom = "", start = -1, end = -1 ):
 
@@ -576,7 +675,7 @@ def readin_bamfile( chrom = "", start = -1, end = -1 ):
 
     max_depth = 0
     codons    = dict()
-    for pile in bam.pileup(chrom, start, end, max_depth=1000):
+    for pile in bam.pileup(chrom, start, end, max_depth=DOWNSAMPLE_DEPTH):
 
         if ( start > -1 and end > -1) :
             if (pile.pos < start or pile.pos > end):
@@ -591,29 +690,36 @@ def readin_bamfile( chrom = "", start = -1, end = -1 ):
         in_coding_frame = 0
         AA_number       = 0
         ref_AA          = ""
+        ref_base        = 'N'
+        if ( fasta_ref ):
+            ref_base        = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos, pile.pos + 1 )
+
 
         if (max_depth < pile.n ):
             max_depth = pile.n
 
 
     # We are in a coding frame...
-        if ( (ORF_start - 1  - pile.pos )%3 == 0):
+        if ( output_format & CODON_OUT and (ORF_start - 1  - pile.pos )%3 == 0):
             
             in_coding_frame = 1
             
             (AA_counts, codons) = codons2AA_counts( codons )
-            
             AA_number    = (1+ (pile.pos + 1 - ORF_start - 3)/3)
             genome_pos   = pile.pos+1 - 3;
+
+            if ( first_codon_to_report > 0 and first_codon_to_report > AA_number):
+#            print "!!!!!!!" + str(first_codon_to_report) + "\t" + str(codon_number)
+                continue
+
+            if ( last_codon_to_report and last_codon_to_report < AA_number):
+                continue
             
-            ref_codon = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos - 3, pile.pos )
-            ref_AA    = codon2AA( ref_codon )
+            if ( fasta_ref ):
+                ref_codon = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos - 3, pile.pos )
+                ref_AA    = codon2AA( ref_codon )
 
             find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number )
-
-#        codons = dict()
-
-
 
 
         for read in pile.pileups:
@@ -643,7 +749,7 @@ def readin_bamfile( chrom = "", start = -1, end = -1 ):
                 avg_base_qual = average_base_qual(read.alignment.qual[ read.qpos:read.qpos+ read.indel + 1]);
 
             elif ( read.indel < 0):
-                alt = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos, pile.pos+abs(read.indel)+1 )
+#                alt = fasta_ref.fetch(str(bam.getrname(pile.tid)), pile.pos, pile.pos+abs(read.indel)+1 )
                 alt = read.alignment.seq[ read.qpos ] + "-" * abs(read.indel)
                 avg_base_qual = ord( read.alignment.qual[ read.qpos] ) - 33
 
@@ -655,60 +761,35 @@ def readin_bamfile( chrom = "", start = -1, end = -1 ):
                 base_counts = update_base_counts(base_counts, alt, 
                                                  avg_base_qual, read.alignment.is_reverse, read.alignment.aend, read_nr)
 
-
-                codons = grow_codons( codons, read.alignment.qname, alt, avg_base_qual, 
-                                      read.alignment.is_reverse, read.alignment.aend, read_nr, in_coding_frame)
+                if ( output_format & CODON_OUT ):
+                    codons = grow_codons( codons, read.alignment.qname, alt, avg_base_qual, 
+                                          read.alignment.is_reverse, read.alignment.aend, read_nr, in_coding_frame)
 
 
 
         if ( deletion_skipping > 0 ):
             deletion_skipping -= 1
         else:
-            consensus_base = find_consensus_base( base_counts )
-        # If the consensus base contains a deletion, set the level of skipping here.
+            consensus_base = find_consensus_base( base_counts, pile.pos, ref_base )
+            # If the consensus base contains a deletion, set the level of skipping here.
             deletion_skipping =  consensus_base.count('-')
 
 
-        fasta_consensus.append( consensus_base )
+            fasta_consensus.append( consensus_base )
 
 
-    print "\n".join( AA_changes )
+    if ( output_format & TAB_OUT ):   
+        print_tab_output()
 
-#print " ".join(Stanford_format[ gene_name])
-
-
-            
-#### get input filename without the path
-    b = re.search(".*\/?(.*)$", bamfile)
-#print b
-    if ( b.group(1) ):
-        bamfilename = b.group(1)
-    else:
-        bamfilename = bamfile
-
-    consensus_seq = "".join( fasta_consensus )
+    if ( output_format & FASTA_OUT ):   
+        print_fasta_consensus()
 
 
-    if ( minus_strand ):
-        consensus_seq = revDNA( consensus_seq )
+    if ( output_format & CODON_OUT ):   
+        print_codon_changes()
 
 
-    consensus_seq = re.sub(r'^N+',"", consensus_seq)
-    consensus_seq = re.sub(r'N+$',"", consensus_seq)
-
-    if ( len(consensus_seq) == 0):
-        exit()
-
-
-    if ( start > -1 and end > -1):
-        print ">%s_Consensus %d-%d" %(bamfilename, start, end)
-    else:
-        print ">%s_Consensus" %(bamfilename)
-
-    print consensus_seq
-
-
-def get_options():
+def get_and_parse_options():
 
     import argparse
 
@@ -717,110 +798,135 @@ def get_options():
     parser.add_argument('-b', '--bam')
     parser.add_argument('-R', '--reference')
 
-
-
-    parser.add_argument('-f', '--fasta_output')
-    parser.add_argument('-c', '--codon_output')
-    parser.add_argument('-B', '--both_output')
-    parser.add_argument('-T', '--tab_output')
+    parser.add_argument('-f', '--fasta_output', action="store_true")
+    parser.add_argument('-c', '--codon_output', action="store_true")
+    parser.add_argument('-B', '--both_output',  action="store_true")
+    parser.add_argument('-T', '--tab_output',   action="store_true" )
 
     parser.add_argument('-p', '--prefix_output', dest='prefix')
     parser.add_argument('-r', '--regions_file', dest='regions')
     parser.add_argument('--region')
 
-
-
     args = parser.parse_args()
+
+    if (args.regions):
+        regions = readin_regions( args.regions )
 
     if (args.region):
         (chromo, start, end) = re.split(':|-', args.region)
 
-        print " -- ".join( [chromo, start, end])
+        regions = [[None, chromo, int(start), int(end), None, None]]
+
+    output = 0 
+
+    # multiple outputs need a file prefix so we can create multiple files
+    if ( args.both_output and not args.prefix ):
+        print "Needs a prefix when doing fasta and codon change output"
+        exit( -1 )
+
+        
+    if ( args.codon_output or args.both_output or args.tab_output):
+        if ( not args.reference ):
+            print "A reference (-R) is needed when doing codon or tab output"
+            exit( -1 )
+
+    if ( args.fasta_output or args.both_output):
+        output += FASTA_OUT
+        if ( args.prefix ):
+            global fasta_fh
+            fasta_fh = open( args.prefix + "_consenus.fasta", 'w')
 
 
-    return args
+    if ( args.codon_output or args.both_output):
+        output += CODON_OUT
+        if ( args.prefix ):
+            global codon_fh
+            codon_fh = open( args.prefix + "_codons.xls", 'w')
+
+    if ( args.tab_output):
+        output = TAB_OUT
+
+
+    if ( not output ):
+        print "Select one of the output formats (-f, -c, -B or -T)"
+        exit( -1 )
+
+    return (args, regions, output)
 
 
 # ---------------- MAIN LOOP ------------------------
 
 
-args = get_options()
-regions = []
-if (args.regions):
-    regions = readin_regions( args.regions )
-    
+fasta_fh = None
+codon_fh = None
+
+(args, regions, output_format) = get_and_parse_options()
+
+
 bamfile   = args.bam
-fasta_ref = args.reference
 bam       = pysam.Samfile( bamfile, "rb" )
-fasta_ref = pysam.Fastafile( fasta_ref );
+
+fasta_ref = None
+
+if ( args.reference ):
+    fasta_ref = args.reference
+    fasta_ref = pysam.Fastafile( fasta_ref );
+
+
+
+bamfile = bamfile.replace('.bam', '')
+b = re.search(".*\/*(.*)$", bamfile)
+if ( b.group(1) ):
+    sample_name = b.group(1)
+else:
+    sample_name = bamfile
 
 start        = -1
 end          = -1
 minus_strand = 0
-#set_start_n_stop()
-#print str(start) + " " + str(end)
-
-
-MIN_MAPQ          =   20
-MIN_BASEQ         =   30
-MIN_COVERAGE      =  500
-MIN_MAP_LEN       =   80
-MIN_BP_FROM_END   =    5
-MIN_ALLELE_PERC   =   20
-AA_MIN_PERC       =    1
-
-
 
 Stanford_format = dict()
 fasta_consensus = []
 AA_changes      = []
+tab_lines       = []
 
-ORF_start = 2550
-ORF_end   = 4227
 
-ORF_start = 140484
-ORF_end   = 142405
-ORF_start = 140483
-#ORF_end   = 142404
-#ORF_start = 142263
+ORF_start = None
+ORF_end   = None
+gene_name = None
 
-gene_name = 'Kinase'
-Stanford_format[gene_name] = [];
+first_codon_to_report = None
+last_codon_to_report  = None
 
+# The user asked us to look at specific regions
 if ( len( regions ) >= 1 ):
 
-
     for region in regions:
+        Stanford_format = dict()
+        fasta_consensus = []
+        AA_changes      = []
+        tab_lines       = []
 
-        (gene_name, reference, ORF_start, ORF_end, first_codon_to_report, last_codon_to_report) = region
+        minus_strand = 0
 
+        (gene_name, reference, region_start, region_end, first_codon_to_report, last_codon_to_report) = region
+        if ( region_start > region_end ):
+            minus_strand = 1
+            (region_start, region_end) = (region_end, region_start)
+
+        if ( output_format & CODON_OUT or output_format & FASTA_OUT ):
+            ORF_start = region_start
+            ORF_end   = region_end
+
+        if ( gene_name ):
+            Stanford_format[ gene_name ] = []
+
+
+        readin_bamfile(reference, int( region_start), int( region_end))
+
+# Generic full out consensus calling.
 else:
-    pass
-
-#readin_bamfile( chrom = "", start = -1, end = -1 )
-
-if ( 0 ) :
-    print "\t".join(["pile.pos",
-                 "major_base",
-                 "minor_base",
-                 "major count",
-                 "minor count",
-
-                 "major_freq",
-                 "minor_freq",
-                 "major_starts",
-                 "major_starts_fwd",
-                 "major_starts_rev",
-                 "minor_starts",
-                 "minor_starts_fwd",
-                 "minor_starts_rev",
-                         
-                 "major_read1",
-                 "major_read2",
-                 
-                 "minor_read1",
-                 "minor_read2"])
-
+    readin_bamfile()
 
 bam.close()
 
