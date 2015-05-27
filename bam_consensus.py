@@ -809,6 +809,7 @@ def get_and_parse_options():
 
     args = parser.parse_args()
 
+    regions = []
     if (args.regions):
         regions = readin_regions( args.regions )
 
@@ -874,12 +875,11 @@ if ( args.reference ):
 
 
 
-bamfile = bamfile.replace('.bam', '')
-b = re.search(".*\/*(.*)$", bamfile)
+sample_name = bamfile
+sample_name = sample_name.replace('.bam', '')
+b = re.search(".*\/(.*)$", sample_name )
 if ( b.group(1) ):
     sample_name = b.group(1)
-else:
-    sample_name = bamfile
 
 start        = -1
 end          = -1
