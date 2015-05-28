@@ -24,14 +24,14 @@ CODON_OUT = 2
 TAB_OUT   = 4
 
 # These affect the sensitivity and behaviour of  the program
-MIN_MAPQ          =    20
-MIN_BASEQ         =    30
-MIN_COVERAGE      =   400
-DOWNSAMPLE_DEPTH  = 10000
-MIN_MAP_LEN       =    80
-MIN_BP_FROM_END   =     5
-MIN_ALLELE_PERC   =    20
-AA_MIN_PERC       =     1
+MIN_MAPQ          =     20
+MIN_BASEQ         =     30
+MIN_COVERAGE      =    400
+DOWNSAMPLE_DEPTH  = 100000
+MIN_MAP_LEN       =     80
+MIN_BP_FROM_END   =      5
+MIN_ALLELE_PERC   =     20
+AA_MIN_PERC       =      1
 
 
 #
@@ -572,7 +572,7 @@ def readin_regions( regions_file ):
             continue
 
         fields = l.split("\t") + [None]*99
-        for n in range(2, 5):
+        for n in range(2, 6):
             if ( fields[ n ]):
                 fields[ n ] = int(fields[ n ])
 
@@ -673,6 +673,7 @@ def readin_bamfile( chrom = "", start = -1, end = -1 ):
 
     deletion_skipping = 0
 
+
     max_depth = 0
     codons    = dict()
     for pile in bam.pileup(chrom, start, end, max_depth=DOWNSAMPLE_DEPTH):
@@ -709,7 +710,6 @@ def readin_bamfile( chrom = "", start = -1, end = -1 ):
             genome_pos   = pile.pos+1 - 3;
 
             if ( first_codon_to_report > 0 and first_codon_to_report > AA_number):
-#            print "!!!!!!!" + str(first_codon_to_report) + "\t" + str(codon_number)
                 continue
 
             if ( last_codon_to_report and last_codon_to_report < AA_number):
