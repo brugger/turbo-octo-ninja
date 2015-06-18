@@ -13,7 +13,9 @@ import scipy
 from scipy import stats
 import getopt
 
+#sys.path.append("/software/lib/python2.7/site-packages/pysam-0.7.5-py2.7-linux-x86_64.egg")
 sys.path.append("/software/lib/python2.7/site-packages/pysam-0.7.5-py2.7-linux-x86_64.egg")
+#sys.path.append("/software/dev/lib/python2.7/site-packages/pysam-0.7.5-py2.7-linux-x86_64.egg")
 import pysam
 
 
@@ -28,6 +30,7 @@ MIN_MAPQ          =     20
 MIN_BASEQ         =     30
 MIN_COVERAGE      =    400
 DOWNSAMPLE_DEPTH  = 100000
+DOWNSAMPLE_DEPTH  = 10000
 MIN_MAP_LEN       =     80
 MIN_BP_FROM_END   =      5
 MIN_ALLELE_PERC   =     20
@@ -818,7 +821,7 @@ def get_and_parse_options():
 
         regions = [[None, chromo, int(start), int(end), None, None]]
 
-    output = 0 
+    output = FASTA_OUT
 
     # multiple outputs need a file prefix so we can create multiple files
     if ( args.both_output and not args.prefix ):
@@ -832,7 +835,7 @@ def get_and_parse_options():
             exit( -1 )
 
     if ( args.fasta_output or args.both_output):
-        output += FASTA_OUT
+        output = FASTA_OUT
         if ( args.prefix ):
             global fasta_fh
             fasta_fh = open( args.prefix + "_consenus.fasta", 'w')
