@@ -204,9 +204,19 @@ def update_base_counts(base_counts, base, qual, strand, pos, read_nr):
         base_counts[ base ][ 0 ] = dict()
         base_counts[ base ][ 1 ] = dict()
 
+        base_counts[ base ][ 'plus_count'  ] = 0
+        base_counts[ base ][ 'minus_count' ] = 0
+
+
     base_counts[ base ][ 'count' ] += 1
     base_counts[ base ][ 'quals' ] += qual
     base_counts[ base ][ 'starts' ].append( pos )
+
+    if (strand == 0):
+        base_counts[ base ][ 'plus_count'  ] += 1
+    else:
+        base_counts[ base ][ 'minus_count' ] += 1
+
 
     if ( read_nr == 1 ):
         base_counts[ base ][ 'read1' ] += 1
@@ -228,7 +238,6 @@ def update_base_counts(base_counts, base, qual, strand, pos, read_nr):
 def grow_codons( codons, read_name, alt, avg_base_qual, strand, pos, read_nr, first_base):
 
     if ( read_name not in codons ):
-        
 
         #Only if we are on the first base of a codon do we create a new entry
         if ( not first_base ):
@@ -276,13 +285,12 @@ def codons2AA_counts( codons ):
         read_nr = codons[ name ][ 'read_nr' ]
 
         
-        # The seq is shorter than the full codon, so we drop it from the table and move on
-        if ( len( codons[ name ][ 'codon' ]) < 3):
+        # The seq is shorter than the full codon + the part of the read we ignore, so we drop it from the table and move on
+        if ( len( codons[ name ][ 'codon' ]) < 3 ):
             codons.pop( name )
         else:
 
             AA_counts = update_AA_counts(AA_counts, codon, qual, strand, pos, read_nr)
-
 
             # Trim away the bases we have used, This is done to ensure that we can 
             # report longer deletions in a nice manner. I am sure there is a massive 
@@ -313,6 +321,9 @@ def update_AA_counts(AA_counts, codon, qual, strand, pos, read_nr):
         AA_counts[ AA ][ 0 ] = dict()
         AA_counts[ AA ][ 1 ] = dict()
 
+        AA_counts[ AA ][ 'plus_count'  ] = 0
+        AA_counts[ AA ][ 'minus_count' ] = 0
+
 
     AA_counts[ AA ][ 'count' ] += 1
     AA_counts[ AA ][ 'quals' ] += qual
@@ -326,6 +337,12 @@ def update_AA_counts(AA_counts, codon, qual, strand, pos, read_nr):
         AA_counts[ AA ][ strand ][ pos ]  = 1
     else:
         AA_counts[ AA ][ strand ][ pos ] += 1
+
+
+    if ( strand == 1 ):
+        AA_counts[ AA ][ 'plus_count'  ] +=1
+    else:
+        AA_counts[ AA ][ 'minus_count'  ] +=1
 
     return AA_counts;
 
@@ -343,6 +360,10 @@ def find_consensus_base( base_counts, pos = 0, ref_base = 'N' ):
     for base in base_counts:
         total_bases += base_counts[ base ]['count']
 
+
+    if ( total_bases < MIN_COVERAGE ):
+        return 'N'
+
     for base in base_counts:
         base_freq = base_counts[ base ]['count']*100.00/total_bases;
         all_base_freqs[ base ] = base_freq
@@ -351,18 +372,32 @@ def find_consensus_base( base_counts, pos = 0, ref_base = 'N' ):
 
         base_freqs[ base ] = base_freq
 
-#    pp.pprint( base_freqs )
 
-    if ( total_bases < MIN_COVERAGE ):
-        return 'N'
+    bases_by_freq = sorted(all_base_freqs, key=base_freqs.get, reverse=True)
+
+
+
+    major_plus  = base_counts[ bases_by_freq[ 0 ]][ 'plus_count'  ]
+    major_minus = base_counts[ bases_by_freq[ 0 ]][ 'minus_count' ]
+    bases_to_skip = dict();
+
+    for i in range(0, len( bases_by_freq)):
+
+        alt_base = bases_by_freq[ i ]
+
+        if ( not pass_fisher_test( major_plus, major_minus, 
+                                   base_counts[ alt_base ][ 'plus_count'  ], base_counts[ alt_base ][ 'minus_count'  ])):
+
+            bases_to_skip[ alt_base ] = 1
+            continue
+
+#    pp.pprint( base_freqs )
 
     if (output_format & TAB_OUT and len( all_base_freqs.keys()) >= 1):
 
-        bases_by_freq = sorted(all_base_freqs, key=base_freqs.get, reverse=True)
 
-        if (ref_base == 'N'):
-            
-            ref_base = bases_by_freq[0]
+#        if (ref_base == 'N'):
+#            ref_base = bases_by_freq[0]
 
         ref_read1 = base_counts[ ref_base ]['read1'] or 0
         ref_read2 = base_counts[ ref_base ]['read2']
@@ -371,8 +406,9 @@ def find_consensus_base( base_counts, pos = 0, ref_base = 'N' ):
         ref_freq = all_base_freqs[ ref_base ]
         ref_starts =  ref_starts_fwd + ref_starts_rev
 
-        for i in range(0, len( bases_by_freq)):
 
+
+        for i in range(0, len( bases_by_freq)):
             alt_base = bases_by_freq[ i ]
 
             if ( ref_base == alt_base):
@@ -388,13 +424,29 @@ def find_consensus_base( base_counts, pos = 0, ref_base = 'N' ):
             alt_read2 = base_counts[ alt_base ]['read2']
 
             global tab_lines
-            tab_lines.append( "\t".join([str(pos),
+
+            passed_fishers_test = 'y'
+
+
+            if ( not pass_fisher_test( major_plus, major_minus, 
+                                       base_counts[ alt_base ][ 'plus_count'  ], base_counts[ alt_base ][ 'minus_count'  ])):
+                passed_fishers_test = 'n'
+
+
+            tab_lines.append( "\t".join([str(pos + 1),
                              ref_base,
-                             base,
+                             alt_base,
                              str(base_counts[ ref_base ][ 'count' ]),
                              str(base_counts[ alt_base ][ 'count' ]),
                              "%.2f" % ref_freq,
                              "%.2f" % alt_freq,
+
+                             str(base_counts[ ref_base ][ 'plus_count'  ]),
+                             str(base_counts[ ref_base ][ 'minus_count' ]),
+                             str(base_counts[ alt_base ][ 'plus_count'  ]),
+                             str(base_counts[ alt_base ][ 'minus_count' ]),
+                             passed_fishers_test,
+
                              str(ref_starts),
                              str(ref_starts_fwd),
                              str(ref_starts_rev),
@@ -438,22 +490,26 @@ def find_consensus_base( base_counts, pos = 0, ref_base = 'N' ):
 #                del base_freqs[ alt_base]
 #                exit()
 
-            # Use fishers test to see if there is a strand bias for the SNP
-            oddsratio, strand_bias_pvalue = stats.fisher_exact([[len(base_counts[ ref_base ][ 0 ].keys()), 
-                                                                 len(base_counts[ ref_base ][ 1 ].keys())], 
-                                                                [len(base_counts[ alt_base ][ 0 ].keys()), 
-                                                                 len(base_counts[ alt_base ][ 1 ].keys())]])
-            if ( strand_bias_pvalue < 0.05 ):
-#                pp.pprint( base_counts)
-                print "\t".join([str(len(base_counts[ ref_base ][ 0 ].keys())),
-                                 str(len(base_counts[ ref_base ][ 1 ].keys())),
-                                 str(len(base_counts[ alt_base ][ 0 ].keys())),
-                                 str(len(base_counts[ alt_base ][ 1 ].keys()))])
 
-#                print "%d -> %d [%s %s] [%f %f]" % (0, i +1 , ref_base, alt_base, ref_freq, alt_freq)
-#                print "strand bias (pvalue): %.2f (> 0.05 no bias)" % strand_bias_pvalue
-#                exit()
 
+    total_bases = 0    
+    for base in base_counts:
+        if ( base in bases_to_skip ):
+            continue
+        total_bases += base_counts[ base ]['count']
+
+    base_freqs = dict()
+    for base in base_counts:
+        if ( base in bases_to_skip ):
+            continue
+        base_freq = base_counts[ base ]['count']*100.00/total_bases;
+        if ( base_freq < MIN_ALLELE_PERC ):
+            continue
+
+        base_freqs[ base ] = base_freq
+
+
+#    pp.pprint( base_freqs )
 
     
 
@@ -464,9 +520,34 @@ def find_consensus_base( base_counts, pos = 0, ref_base = 'N' ):
 
 
 
+def pass_fisher_test( ref_fwd=0, ref_rev=0, alt_fwd=0, alt_rev=0):
+
+    # Use fishers test to see if there is a strand bias for the SNP
+    oddsratio, strand_bias_pvalue = stats.fisher_exact([[ref_fwd, ref_rev],
+                                                        [alt_fwd, alt_rev]])
+
+
+
+    if ( 0 ):
+        print "Fisher_test: odds ratio: %0.2f, p-value: %.2f" % ( oddsratio, strand_bias_pvalue );
+        print "\t".join([str( ref_fwd), str( ref_rev), str( alt_fwd), str( alt_rev)])
+
+    
+
+    if ( strand_bias_pvalue > 0.01 ):
+        return 1
+
+    else:
+        
+        return 0
+
+
+
 def find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number ):
 
     AA_freqs = dict()
+
+    AA_ref_freq = 0
 
     total_AAs = 0
     for AA in AA_counts:
@@ -479,27 +560,55 @@ def find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number ):
 
     alternative_AAs = 0
 
+
     for AA in AA_counts:
-        if ( ref_AA == AA ):
-            continue
+
 
         AA_freq = AA_counts[ AA ]['count']*100.00/total_AAs;
         if ( AA_freq < AA_MIN_PERC ):
             continue
 
-        AA_freqs[ AA ] = AA_freq
-        alternative_AAs += 1
+        
+
+        if ( ref_AA == AA ):
+            AA_ref_freq = AA_freq
+        else:
+#            print " %s%d -> %s" %(ref_AA, AA_number, AA)
+            AA_freqs[ AA ] = AA_freq
+            alternative_AAs += 1
 
     if ( alternative_AAs == 0 ):
         return
 
     AAs_by_freq = sorted(AA_freqs, key=AA_freqs.get, reverse=True)
+
+    max_plus_count  = AA_counts[ AAs_by_freq[0] ]['plus_count']
+    max_minus_count = AA_counts[ AAs_by_freq[0] ]['minus_count']
+
+    if ( AA_ref_freq > 10):
+        max_plus_count  = AA_counts[ ref_AA ]['plus_count']
+        max_minus_count = AA_counts[ ref_AA ]['minus_count']
+
+
+
     AA_line = []
     AA_line.append(str(genome_pos));
     AA_line.append(ref_AA+str(AA_number))
     added_D = 0
     added_I = 0
+    added_mutations = 0
     for AA in AAs_by_freq:
+
+
+        if (pass_fisher_test( max_plus_count, max_minus_count, 
+                               AA_counts[ AA ]['plus_count'], AA_counts[AA ]['minus_count']) == 0):
+
+#            print "Failed fisher test!@#$@#$ "
+            continue
+
+
+        added_mutations = 1
+
         AA_line.append( "%s:%.2f%%" % (AA, AA_freqs[ AA ]))
 
         if ( re.match('insertion', AA ) and not added_D ):
@@ -512,7 +621,8 @@ def find_significant_AAs( AA_counts, genome_pos, ref_AA, AA_number ):
             Stanford_format[gene_name].append("%s%d%s" % (ref_AA, AA_number, AA))
 
         
-    AA_changes.append("\t".join( AA_line ))
+    if ( added_mutations ):
+        AA_changes.append("\t".join( AA_line ))
 #    pp.pprint( AA_counts )
 #    exit()
     
@@ -579,6 +689,9 @@ def readin_regions( regions_file ):
             if ( fields[ n ]):
                 fields[ n ] = int(fields[ n ])
 
+
+        fields[2] -= 1
+        fields[3] -= 1
         regions.append(fields[0:6])
 
     return regions
@@ -591,11 +704,19 @@ def print_tab_output( tab_data_lines = None):
     print "\t".join(["pile.pos",
                  "ref/major base",
                  "alt base",
-                 "major count",
                  "ref count",
+                 "alt count",
 
                  "ref freq",
                  "alt freq",
+
+                 "ref +",
+                 "ref -",
+                 "alt +",
+                 "alt -",
+                 "Passed fishers test",
+
+
                  "ref starts",
                  "ref starts fwd",
                  "re starts rev",
@@ -708,14 +829,29 @@ def readin_bamfile( chrom = "", start = -1, end = -1 ):
             
             in_coding_frame = 1
             
-            (AA_counts, codons) = codons2AA_counts( codons )
             AA_number    = (1+ (pile.pos + 1 - ORF_start - 3)/3)
             genome_pos   = pile.pos+1 - 3;
 
-            if ( first_codon_to_report > 0 and first_codon_to_report > AA_number):
+            (AA_counts, codons) = codons2AA_counts( codons )
+
+#            print 
+            
+
+            if ( 0 and AA_number == 24 ):
+#                pp.pprint( codons    )
+                pp.pprint( AA_counts )
+
+                pass_fisher_test( AA_counts['L']['plus_count'], AA_counts['L']['minus_count'], AA_counts['*']['plus_count'], AA_counts['*']['minus_count'])
+#                pass_fisher_test( 0,9,0,5)
+
+#                exit()
+
+
+
+            if ( first_codon_to_report > 0 and first_codon_to_report > AA_number ):
                 continue
 
-            if ( last_codon_to_report and last_codon_to_report < AA_number):
+            if ( last_codon_to_report and last_codon_to_report < AA_number ):
                 continue
             
             if ( fasta_ref ):
@@ -819,7 +955,12 @@ def get_and_parse_options():
     if (args.region):
         (chromo, start, end) = re.split(':|-', args.region)
 
-        regions = [[None, chromo, int(start), int(end), None, None]]
+        # positions are 0 indexed...
+        start = int( start ) - 1
+        end   = int( end   ) -1
+
+        regions = [['NA', chromo, start, end, None, None]]
+
 
     output = FASTA_OUT
 
